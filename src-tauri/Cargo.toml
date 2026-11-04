@@ -34,6 +34,7 @@ base64 = "0.22"
 percent-encoding = "2"
 once_cell = "1"
 url = "2"
+tauri-plugin-haptics = "2.3.3"
 
 [profile.release]
 panic = "abort"

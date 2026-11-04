@@ -9,6 +9,9 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // iOS 的 WebKit 没有 Vibration API，触感只能走 UIImpactFeedbackGenerator；
+        // 桌面端该插件是空实现，不影响 Windows/macOS。
+        .plugin(tauri_plugin_haptics::init())
         .manage(Api::new())
         .setup(|app| {
             if let Ok(dir) = app.path().app_data_dir() {
@@ -16,17 +19,33 @@ pub fn run() {
                 let state: tauri::State<Api> = app.state();
                 state.session.bind(dir);
             }
+            // 无边框窗口在 macOS 上仍然需要菜单栏：WKWebView 的复制/粘贴/全选走
+            //  responder chain，没有 Edit 菜单时登录框连密码都粘不进去。
+            #[cfg(target_os = "macos")]
+            {
+                let menu = tauri::menu::Menu::default(app.handle())?;
+                app.set_menu(menu)?;
+            }
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("hg", |_app, request, responder| {
             let uri = request.uri().clone();
             let path = uri.path().to_string();
             let query = uri.query().unwrap_or("").to_string();
-            // 自定义协议在 Windows 上是 http://<scheme>.localhost，Android 上是 https://
-            // 注意：请求 URI 的 scheme 是 "hg"，不能拿来拼子资源地址，否则 WebView 无法解析。
-            let scheme = "http".to_string();
+            // m3u8 里的分片 / key 要改写成 WebView 真能解析的绝对地址，而各宿主给自定义协议
+            // 套的壳不一样：WKWebView（macOS / iOS）是真自定义协议 hg://localhost，
+            // WebView2 与 Android 是 http://hg.localhost。
+            // 不能从 request.uri() 反推：wry 在 Windows/Android 上会先把 http(s)://hg. 还原成
+            // hg:// 再回调，反推会得到一个 WebView 解析不了的地址。必须和前端 api.ts 的
+            // LOCAL 用同一套判断。
+            let origin = if cfg!(any(target_os = "macos", target_os = "ios")) {
+                "hg://localhost"
+            } else {
+                "http://hg.localhost"
+            }
+            .to_string();
             tauri::async_runtime::spawn(async move {
-                let resp = media::handle(&path, &query, &scheme).await;
+                let resp = media::handle(&path, &query, &origin).await;
                 responder.respond(resp);
             });
         })

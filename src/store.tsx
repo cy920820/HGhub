@@ -1,8 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { api, platform as envPlatform } from "./api";
+import { api, platform as envPlatform, type Platform } from "./api";
 import type { User } from "./types";
 
-export type Platform = "android" | "windows";
+export type { Platform };
 export type Theme = "dark" | "light";
 export type Tab = "home" | "search" | "category" | "profile";
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useStore, type Tab } from "../store";
-import { APP_VERSION } from "../api";
+import { APP_VERSION, PLATFORM_LABEL, platform } from "../api";
 import { Avatar } from "./ui";
 import {
   IClose, IGrid, IGridF, IHome, IHomeF, IMinus, IMoon, IRestore, ISearch, ISidebar,
@@ -88,7 +88,7 @@ export function WindowsRail({ collapsed }: { collapsed: boolean }) {
               <small>{user ? "你的精彩，都在这里" : "留住每一次心动"}</small>
             </span>
           </button>
-          <span className="win-sidebar-version">HGhub for Windows {APP_VERSION}</span>
+          <span className="win-sidebar-version">HGhub for {PLATFORM_LABEL[platform]} {APP_VERSION}</span>
         </div>
       </div>
     </nav>

@@ -66,7 +66,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     setReady(false);
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
 
-    const proxied = /^https?:\/\/hg\.localhost\//.test(src);
+    // 已经是本地协议（Windows/Android 的 http(s)://hg.localhost 或 macOS/iOS 的 hg://localhost）就不再包一层
+    const proxied = /^(https?:\/\/hg\.localhost|hg:\/\/localhost)\//.test(src);
     const url = proxied ? src : playlist(src);
     const useHls = !url.includes("/seg?u=");
 
@@ -81,6 +82,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     applySettings();
 
     if (useHls && Hls.isSupported()) {
+      // iOS 走的是 hls.js 的 ManagedMediaSource 分支，因此 bundle.iOS.minimumSystemVersion 定在 17.1：
+      // 更低的系统既没有 MSE/MMS，原生 <video> 又啃不动 hg:// 自定义协议。
       const hls = new Hls({
         enableWorker: true,
         maxBufferLength: 30,

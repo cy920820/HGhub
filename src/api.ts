@@ -8,12 +8,46 @@ import type {
 /** 应用版本（构建时由 vite.config.ts 从 package.json 注入） */
 export const APP_VERSION = __APP_VERSION__;
 
-export const isAndroid = /Android/i.test(navigator.userAgent);
-export const platform: "android" | "windows" = isAndroid ? "android" : "windows";
+export type Platform = "android" | "ios" | "macos" | "windows";
 
-/** 自定义协议：Windows 与 Android 都是 http://<scheme>.localhost */
-const scheme = "http";
-export const LOCAL = `${scheme}://hg.localhost`;
+const ua = navigator.userAgent;
+const isAndroidUA = /Android/i.test(ua);
+// iOS 的 UA 里也带 "like Mac OS X"，必须先按设备排掉；iPadOS 13+ 默认把 UA 伪装成 Macintosh，
+// 用多点触控兜底（Mac 笔记本的 trackpad 不算 maxTouchPoints，Safari 报 0）。
+const isIOSUA =
+  !isAndroidUA &&
+  (/iPhone|iPad|iPod/i.test(ua) ||
+    (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1));
+const isMacUA = !isAndroidUA && !isIOSUA && /Macintosh|Mac OS X/i.test(ua);
+
+export const platform: Platform = isAndroidUA
+  ? "android"
+  : isIOSUA
+    ? "ios"
+    : isMacUA
+      ? "macos"
+      : "windows";
+
+export const isDesktop = platform === "windows" || platform === "macos";
+export const isMobile = !isDesktop;
+
+/** 界面文案用的平台名 */
+export const PLATFORM_LABEL: Record<Platform, string> = {
+  windows: "Windows",
+  macos: "macOS",
+  android: "Android",
+  ios: "iOS",
+};
+
+/**
+ * 本地媒体协议 origin。各宿主给自定义协议套的壳不同：
+ * Windows(WebView2) / Android 走 `http://hg.localhost`，
+ * macOS / iOS(WKWebView) 是真自定义协议 `hg://localhost`。
+ * Rust 侧 lib.rs 用 cfg!(target_os) 按同一套判断改写 m3u8 子资源，两边必须一致。
+ */
+export const LOCAL = platform === "macos" || platform === "ios"
+  ? "hg://localhost"
+  : "http://hg.localhost";
 
 /** 封面：经本地协议解密（站点封面是 AES 密文）。 */
 export const cover = (url?: string, _w = 480) =>

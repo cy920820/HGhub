@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, cover, fmt, fmtTime, mediaUrl, platform } from "../api";
+import { api, cover, fmt, fmtTime, isDesktop, mediaUrl } from "../api";
+import { haptic } from "../haptics";
 import type { Detail, Episode, Post, VideoCard } from "../types";
 import { useStore } from "../store";
 import { Avatar, Img, Sheet } from "./ui";
@@ -32,7 +33,6 @@ const stripHtml = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, "
 export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind = "video", active, bottomInset, onBack, onNearEnd }: Props) {
   const store = useStore();
   const { isLiked, isFav, toggleLikeLocal, toggleFavLocal, toggleFollowLocal, muted, setMuted, volume, setVolume, toast, addHistory, user, setLoginOpen } = store;
-  const isDesktop = platform === "windows";
 
   const boxRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<VideoHandle>(null);
@@ -290,7 +290,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         setHoldSpeed(true);
         setLockArmed(false);
         lockArmedRef.current = false;
-        try { navigator.vibrate?.(25); } catch { /* ignore */ }
+        haptic("medium");
       }, 380) as unknown as number,
     };
     gesture.current = g;
@@ -308,6 +308,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       if (armed !== lockArmedRef.current) {
         lockArmedRef.current = armed;
         setLockArmed(armed);
+        if (armed) haptic("light");
       }
       return;
     }
