@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, useRef, forwardRef, useState } from "react";
 import Hls from "hls.js";
-import { playlist } from "../api";
+import { isLocalMedia, playlist } from "../api";
 
 export type VideoHandle = {
   el: () => HTMLVideoElement | null;
@@ -66,7 +66,7 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     setReady(false);
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
 
-    const proxied = /^https?:\/\/hg\.localhost\//.test(src);
+    const proxied = isLocalMedia(src);
     const url = proxied ? src : playlist(src);
     const useHls = !url.includes("/seg?u=");
 
@@ -82,6 +82,10 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
 
     if (useHls && Hls.isSupported()) {
       const hls = new Hls({
+        // 禁用从插播/内容引导 JSON 派生直连 URL 的可选功能。
+        interstitialsController: undefined,
+        contentSteeringController: undefined,
+        enableInterstitialPlayback: false,
         enableWorker: true,
         maxBufferLength: 30,
         backBufferLength: 30,

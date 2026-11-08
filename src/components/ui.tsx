@@ -30,7 +30,8 @@ export function Sheet({ open, onClose, children, z = "z-40" }: { open: boolean; 
   if (!render) return null;
   return (
     <div className={`absolute inset-0 ${z}`}>
-      <div className={`absolute inset-0 bg-black/55 ${open ? "a-fade" : "opacity-0 transition-opacity duration-200"}`} onClick={onClose} />
+      <div className={`absolute inset-0 ${open ? "a-fade" : "opacity-0 transition-opacity duration-200"}`}
+        style={{ background: "rgba(0,0,0,.55)" }} onClick={onClose} />
       <div className={`absolute bottom-0 inset-x-0 bg-s2 elev-3 overflow-hidden ${open ? "a-sheet" : "a-sheet-out"}`}
         style={{ paddingBottom: "var(--sab, 0px)", borderTopLeftRadius: "var(--r-lg)", borderTopRightRadius: "var(--r-lg)" }}>
         <div className="pt-3 pb-1 flex justify-center"><div className="w-8 h-1 rounded-full bg-dim/70" /></div>
@@ -59,10 +60,10 @@ export function Modal({ open, onClose, children, width = 340 }: { open: boolean;
 }
 
 /* ——— 开关 ——— */
-export function Toggle({ on, onChange, label }: { on: boolean; onChange: (b: boolean) => void; label?: string }) {
+export function Toggle({ on, onChange, label, disabled = false }: { on: boolean; onChange: (b: boolean) => void; label?: string; disabled?: boolean }) {
   return (
-    <button onClick={() => onChange(!on)} aria-pressed={on} aria-label={label}
-      className={`relative w-[46px] h-[26px] rounded-full transition-colors duration-200 ${on ? "bg-primary" : "bg-s4"}`}>
+    <button disabled={disabled} onClick={() => onChange(!on)} aria-pressed={on} aria-label={label}
+      className={`relative w-[46px] h-[26px] rounded-full transition-colors duration-200 disabled:opacity-50 disabled:cursor-wait ${on ? "bg-primary" : "bg-s4"}`}>
       <span className={`absolute top-[3px] w-5 h-5 rounded-full elev-1 transition-all duration-200 ${on ? "left-[23px] bg-on-primary" : "left-[3px] bg-mut"}`} />
     </button>
   );
