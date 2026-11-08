@@ -1,26 +1,36 @@
-import { useEffect, useRef, useState } from "react";
-import { api, fmt } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, fmt, cover as imageCover } from "../api";
+import { handleArticleClick, sanitizeHtml } from "../html";
 import type { Comment, CommentPage, Episode } from "../types";
 import { useStore } from "../store";
 import { Avatar, Empty } from "./ui";
 import { IClose, IHeart, ISendF } from "../icons";
 
 /* ================= 选集 ================= */
-export function EpisodesPanel({ videoId, episodes, current, onPick, onClose }: {
+export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bare = false }: {
   videoId: number; episodes: Episode[]; current: number; onPick: (ep: number) => void; onClose: () => void;
+  /** 嵌在双栏抽屉里时，隐藏自带的标题栏与底注 */
+  bare?: boolean;
 }) {
   const [asc, setAsc] = useState(true);
   const list = asc ? episodes : [...episodes].reverse();
   return (
     <div className="flex flex-col h-full">
-      <div className="shrink-0 flex items-center gap-2 px-4 h-12">
-        <span className="text-[13.5px] font-bold text-on">选集</span>
-        <span className="text-[10.5px] text-mut">共 {episodes.length} 集</span>
-        <button onClick={() => setAsc((v) => !v)} className="ml-auto text-[11px] text-primary pressable">{asc ? "倒序" : "正序"}</button>
-        <button onClick={onClose} aria-label="关闭" className="w-7 h-7 rounded-full bg-s3 flex items-center justify-center text-mut pressable">
-          <IClose size={13} />
-        </button>
-      </div>
+      {bare ? (
+        <div className="shrink-0 flex items-center gap-2 px-4 pb-2">
+          <span className="text-[10.5px] text-mut">共 {episodes.length} 集</span>
+          <button onClick={() => setAsc((v) => !v)} className="ml-auto text-[11px] text-primary pressable">{asc ? "倒序" : "正序"}</button>
+        </div>
+      ) : (
+        <div className="shrink-0 flex items-center gap-2 px-4 h-12">
+          <span className="text-[13.5px] font-bold text-on">选集</span>
+          <span className="text-[10.5px] text-mut">共 {episodes.length} 集</span>
+          <button onClick={() => setAsc((v) => !v)} className="ml-auto text-[11px] text-primary pressable">{asc ? "倒序" : "正序"}</button>
+          <button onClick={onClose} aria-label="关闭" className="w-7 h-7 rounded-full bg-s3 flex items-center justify-center text-mut pressable">
+            <IClose size={13} />
+          </button>
+        </div>
+      )}
       <div className="flex-1 scroll-y px-4 pb-4">
         <div className="grid grid-cols-4 gap-2">
           {list.map((e) => (
@@ -32,7 +42,7 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose }: {
         </div>
         {!episodes.length && <div className="text-center text-[11.5px] text-dim py-8">暂无剧集</div>}
       </div>
-      <div className="shrink-0 px-4 py-2.5 text-[10.5px] text-dim bg-s2/60">剧集 ID {videoId} · 点选即切换播放</div>
+      {!bare && <div className="shrink-0 px-4 py-2.5 text-[10.5px] text-dim bg-s2/60">剧集 ID {videoId} · 点选即切换播放</div>}
     </div>
   );
 }
@@ -101,7 +111,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
 
       <div className="flex-1 scroll-y px-4">
         {items.length ? items.map((c) => (
-          <div key={c.id} className="flex gap-2.5 py-3 border-b border-white/5 last:border-0">
+          <div key={c.id} className="flex gap-2.5 py-3 border-b border-s3 last:border-0">
             <Avatar size={32} name={c.nickname} hue={(c.user_id * 37) % 360} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
@@ -148,6 +158,13 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
 export function ArticlePanel({ title, html, cover, hot, onClose }: {
   title: string; html: string; cover?: string; hot?: number; onClose: () => void;
 }) {
+  const { toast, strictSecurity } = useStore();
+  const safeHtml = useMemo(() => sanitizeHtml(html), [html, strictSecurity]);
+  const openSafeLink = (url: string) => {
+    api.openUrl(url).catch(() => {
+      navigator.clipboard?.writeText(url).then(() => toast("链接已复制", "ok")).catch(() => {});
+    });
+  };
   return (
     <div className="flex flex-col h-full">
       <div className="shrink-0 flex items-center gap-2 px-4 h-12">
@@ -158,10 +175,10 @@ export function ArticlePanel({ title, html, cover, hot, onClose }: {
         </button>
       </div>
       <div className="flex-1 scroll-y px-4 pb-6">
-        {cover && <img src={cover} alt="" className="w-full rounded-(--r-md) mb-3 object-cover" />}
+        {cover && <img src={imageCover(cover)} alt="" className="w-full rounded-(--r-md) mb-3 object-cover" />}
         <h2 className="text-[16px] font-bold text-on leading-snug">{title}</h2>
-        <div className="article-body mt-3" dangerouslySetInnerHTML={{ __html: html }} />
-        {!html && <p className="text-[12px] text-dim mt-4">这篇内容没有正文，可能只有图片或视频。</p>}
+        <div className="article-body mt-3" onClick={(e) => handleArticleClick(e, openSafeLink)} dangerouslySetInnerHTML={{ __html: safeHtml }} />
+        {!safeHtml && <p className="text-[12px] text-dim mt-4">这篇内容没有正文，可能只有图片或视频。</p>}
       </div>
     </div>
   );

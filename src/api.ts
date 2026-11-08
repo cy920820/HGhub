@@ -8,12 +8,49 @@ import type {
 /** 应用版本（构建时由 vite.config.ts 从 package.json 注入） */
 export const APP_VERSION = __APP_VERSION__;
 
-export const isAndroid = /Android/i.test(navigator.userAgent);
-export const platform: "android" | "windows" = isAndroid ? "android" : "windows";
+export type Platform = "android" | "ios" | "macos" | "windows";
 
-/** 自定义协议：Windows 与 Android 都是 http://<scheme>.localhost */
-const scheme = "http";
-export const LOCAL = `${scheme}://hg.localhost`;
+const ua = navigator.userAgent;
+const isAndroidUA = /Android/i.test(ua);
+// iOS 的 UA 里也带 "like Mac OS X"，必须先按设备排掉；iPadOS 13+ 默认把 UA 伪装成 Macintosh，
+// 用多点触控兜底（Mac 笔记本的 trackpad 不算 maxTouchPoints，Safari 报 0）。
+const isIOSUA =
+  !isAndroidUA &&
+  (/iPhone|iPad|iPod/i.test(ua) ||
+    (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1));
+const isMacUA = !isAndroidUA && !isIOSUA && /Macintosh|Mac OS X/i.test(ua);
+
+export const platform: Platform = isAndroidUA
+  ? "android"
+  : isIOSUA
+    ? "ios"
+    : isMacUA
+      ? "macos"
+      : "windows";
+
+export const isDesktop = platform === "windows" || platform === "macos";
+export const isMobile = !isDesktop;
+
+/** 界面文案用的平台名 */
+export const PLATFORM_LABEL: Record<Platform, string> = {
+  windows: "Windows",
+  macos: "macOS",
+  android: "Android",
+  ios: "iOS",
+};
+
+/**
+ * 自定义协议地址随平台不同（见 tauri `register_asynchronous_uri_scheme_protocol` 文档）：
+ * Windows(WebView2) / Android → `http://hg.localhost`，
+ * macOS / iOS(WKWebView) → 真自定义协议 `hg://localhost`。
+ * Rust 侧 `src-tauri/src/media.rs` 的 `LOCAL_ORIGIN` 用同一套判断，两边必须一致。
+ */
+export const LOCAL = platform === "macos" || platform === "ios"
+  ? "hg://localhost"
+  : "http://hg.localhost";
+
+/** src 是否已是本地协议地址（避免在详情页把代理地址再包一层） */
+export const isLocalMedia = (src: string) => src.startsWith(`${LOCAL}/`);
 
 /** 封面：经本地协议解密（站点封面是 AES 密文）。 */
 export const cover = (url?: string, _w = 480) =>
@@ -41,7 +78,15 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 /* ── 接口 ───────────────────────────────────────────────── */
 
 export const api = {
-  boot: () => call<{ user: User | null; logged_in: boolean; base: string }>("app_boot"),
+  boot: () =>
+    call<{
+      user: User | null;
+      logged_in: boolean;
+      base: string;
+      strict_security?: boolean;
+      cli_relaxed?: boolean;
+    }>("app_boot"),
+  securitySet: (strict: boolean) => call<boolean>("security_set", { strict }),
   login: (username: string, password: string) =>
     call<{ user: User }>("api_login", { username, password }),
   register: (username: string, password: string, email = "") =>
@@ -77,6 +122,41 @@ export const api = {
   like: (id: number, ep: number, on: boolean) => call<unknown>("api_like", { id, ep, on }),
   collect: (id: number, on: boolean) => call<unknown>("api_collect", { id, on }),
   follow: (uid: number, on: boolean) => call<unknown>("api_follow", { uid, on }),
+
+  /* 线路（数据源）：固定线路写死在 Rust 侧，镜像线路按需从地址发布页拉取 */
+  lineState: () => call<LineState>("line_state"),
+  lineSet: (url: string) => call<string>("line_set", { url }),
+  lineMirrors: () => call<LineMirrors>("line_mirrors"),
+  lineProbe: (urls: string[]) => call<LineProbe[]>("line_probe", { urls }),
+
+  /* 更新检查：对比 GitHub Release 的 tag */
+  checkUpdate: () => call<UpdateInfo>("check_update"),
+  openUrl: (url: string) => call<void>("open_url", { url }),
+};
+
+/* ── 更新检查 ───────────────────────────────────────────── */
+
+export type UpdateInfo = {
+  current: string;
+  latest: string;
+  tag?: string;
+  has_update: boolean;
+  url: string;
+  name?: string;
+  published_at?: string;
+  notes?: string;
+};
+
+/* ── 线路（数据源） ─────────────────────────────────────── */
+
+export type LineItem = { name?: string; url: string; host?: string };
+export type LineState = { base: string; default: string; fixed: LineItem[] };
+export type LineMirrors = { source: string; script?: string; items: LineItem[] };
+export type LineProbe = { url: string; ok: boolean; status?: number; ms: number; error?: string };
+
+/** `https://a.b/c` → `a.b`（线路展示用） */
+export const hostOf = (url: string) => {
+  try { return new URL(url).host; } catch { return url.replace(/^https?:\/\//, "").replace(/\/.*$/, ""); }
 };
 
 /* ── 自检：验证 webview → 本地协议 → 上游 的取流链路 ───────── */
@@ -148,34 +228,6 @@ export const dur = (s?: number | string) => {
   return `${m}:${String(ss).padStart(2, "0")}`;
 };
 
-/** 真实解码探针：用 hls.js 挂一个隐藏 video，回报 readyState / 尺寸 / 进度。 */
-export async function mediaPlaybackProbe(): Promise<string> {
-  const Hls = (await import("hls.js")).default;
-  const info = await api.play(117, 3);
-  const src = playlist(info.video_url);
-  const video = document.createElement("video");
-  video.muted = true;
-  video.playsInline = true;
-  video.style.cssText = "position:fixed;left:-10px;top:-10px;width:2px;height:2px;opacity:0;pointer-events:none";
-  document.body.appendChild(video);
-  return await new Promise<string>((resolve) => {
-    let done = false;
-    const finish = (note: string) => {
-      if (done) return;
-      done = true;
-      const out = `${note} rs=${video.readyState} w=${video.videoWidth} h=${video.videoHeight} t=${video.currentTime.toFixed(2)} err=${video.error?.code ?? 0}`;
-      try { hls.destroy(); } catch { /* ignore */ }
-      video.remove();
-      resolve(out);
-    };
-    const hls = new Hls({ enableWorker: false });
-    hls.on(Hls.Events.ERROR, (_e, d) => { if (d.fatal) finish(`fatal:${d.details}`); });
-    hls.loadSource(src);
-    hls.attachMedia(video);
-    video.play().catch(() => {});
-    window.setTimeout(() => finish("timeout"), 9000);
-  });
-}
 /** 非 m3u8 媒体（mp4 等）走 /seg 原样透传 */
 export function directMedia(url: string): string {
   return `${LOCAL}/seg?u=${encodeURIComponent(url)}`;

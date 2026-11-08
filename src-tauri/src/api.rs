@@ -1,9 +1,10 @@
 //! 业务命令：登录 / 列表 / 详情 / 播放 / 互动。
 
-use crate::net::{edge, BASE};
+use crate::net::{base, edge};
 use crate::session::SessionStore;
 use serde_json::{json, Value};
 use tauri::State;
+use tauri_plugin_opener::OpenerExt;
 
 pub struct Api {
     pub session: SessionStore,
@@ -16,20 +17,19 @@ impl Api {
         }
     }
 
-    fn token(&self) -> Option<String> {
-        self.session.token()
-    }
-
     async fn get(&self, path: &str) -> Result<Value, String> {
-        let token = self.token();
-        edge("GET", path, None, token.as_deref()).await
+        let origin = base();
+        let token = self.session.token(&origin);
+        edge(&origin, "GET", path, None, token.as_deref()).await
     }
 
     async fn authed(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+        let origin = base();
         let token = self
-            .token()
+            .session
+            .token(&origin)
             .ok_or_else(|| "请先登录".to_string())?;
-        edge(method, path, body, Some(&token)).await
+        edge(&origin, method, path, body, Some(&token)).await
     }
 }
 
@@ -41,7 +41,11 @@ pub async fn debug_log(app: tauri::AppHandle, msg: String) -> Result<(), String>
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("debug.log");
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let _ = writeln!(f, "{}", msg);
     }
     Ok(())
@@ -53,15 +57,149 @@ pub async fn net_diag() -> Result<Value, String> {
     Ok(crate::net::diagnose().await)
 }
 
+/* ───────────────────────── 线路（数据源） ───────────────────────── */
+
+/// 当前线路 + 固定线路清单（镜像线路另外按需拉取）。
+#[tauri::command]
+pub async fn line_state() -> Result<Value, String> {
+    Ok(json!({
+        "base": base(),
+        "default": crate::net::DEFAULT_BASE,
+        "fixed": crate::lines::fixed(),
+    }))
+}
+
+/// 手动切换线路：立即生效并落盘（下次启动沿用）。
+#[tauri::command]
+pub async fn line_set(state: State<'_, Api>, url: String) -> Result<String, String> {
+    let previous = base();
+    let next = crate::net::set_base(&url)?;
+    if previous != next {
+        state.session.clear();
+    }
+    Ok(next)
+}
+
+/// 从地址发布页抓镜像线路（只在用户点开「线路」时调用）。
+#[tauri::command]
+pub async fn line_mirrors() -> Result<Value, String> {
+    // 用户手动点「刷新 / 打开线路」时重新读一次系统代理：代理软件开关过之后旧客户端会卡死
+    crate::net::refresh_client();
+    crate::lines::mirrors().await
+}
+
+/// 可达性探测：只报结果，不做自动检查 / 自动切换。
+#[tauri::command]
+pub async fn line_probe(urls: Vec<String>) -> Result<Value, String> {
+    crate::net::refresh_client();
+    Ok(crate::lines::probe(urls).await)
+}
+
+/* ───────────────────────── 更新检查 ───────────────────────── */
+
+const REPO: &str = "Minireel/HGhub";
+
+fn ver_parts(v: &str) -> Vec<u64> {
+    v.trim()
+        .trim_start_matches(['v', 'V'])
+        .split(['.', '-', '+'])
+        .map(|s| s.trim().parse::<u64>().unwrap_or(0))
+        .collect()
+}
+
+/// 只比较数字段：`v1.2.0` > `1.1.9`；解析不出的段按 0 处理。
+fn is_newer(latest: &str, current: &str) -> bool {
+    let (a, b) = (ver_parts(latest), ver_parts(current));
+    for i in 0..a.len().max(b.len()) {
+        let x = *a.get(i).unwrap_or(&0);
+        let y = *b.get(i).unwrap_or(&0);
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
+/// 对比 GitHub Release 的 tag 与当前版本（未认证 60 次/小时/IP，够用）。
+#[tauri::command]
+pub async fn check_update() -> Result<Value, String> {
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
+    let resp = crate::net::get(
+        &url,
+        std::time::Duration::from_secs(12),
+        Some("application/vnd.github+json"),
+        None,
+    )
+    .await?;
+
+    let status = resp.status();
+    if status.as_u16() == 404 {
+        // 还没发过 release
+        return Ok(json!({
+            "current": current, "latest": "", "has_update": false,
+            "url": format!("https://github.com/{REPO}/releases"),
+        }));
+    }
+    if !status.is_success() {
+        return Err(format!("GitHub 返回 HTTP {status}"));
+    }
+
+    let v: Value = resp.json().await.map_err(|e| crate::net::err_text(&e))?;
+    let tag = v
+        .get("tag_name")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let html = v
+        .get("html_url")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("https://github.com/{REPO}/releases"));
+    let notes = v.get("body").and_then(|x| x.as_str()).unwrap_or("");
+
+    Ok(json!({
+        "current": current,
+        "latest": tag.trim_start_matches(['v', 'V']).to_string(),
+        "tag": tag,
+        "has_update": !tag.is_empty() && is_newer(&tag, &current),
+        "url": html,
+        "name": v.get("name").and_then(|x| x.as_str()).unwrap_or(""),
+        "published_at": v.get("published_at").and_then(|x| x.as_str()).unwrap_or(""),
+        "notes": notes.chars().take(800).collect::<String>(),
+    }))
+}
+
+/// 用系统默认浏览器打开链接（只允许 http/https）。
+#[tauri::command]
+pub async fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let target = crate::network_policy::parse_target(&url)?;
+    // 固定使用默认处理器；不向前端暴露可指定程序的 opener 命令。
+    app.opener()
+        .open_url(target.as_str(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 /* ───────────────────────── 会话 ───────────────────────── */
 
 #[tauri::command]
 pub async fn app_boot(state: State<'_, Api>) -> Result<Value, String> {
+    let origin = base();
     Ok(json!({
-        "user": state.session.user(),
-        "logged_in": state.session.token().is_some(),
-        "base": BASE,
+        "user": state.session.user(&origin),
+        "logged_in": state.session.token(&origin).is_some(),
+        "base": origin,
+        "strict_security": crate::network_policy::strict_security(),
+        "cli_relaxed": crate::network_policy::cli_strict_override() == Some(false),
     }))
+}
+
+/// 切换严格安全模式（关闭后回退到兼容清洗与网络守卫模式，立即生效并落盘）。
+#[tauri::command]
+pub async fn security_set(strict: bool) -> Result<bool, String> {
+    crate::network_policy::set_strict_security(strict)?;
+    crate::net::refresh_client();
+    Ok(crate::network_policy::strict_security())
 }
 
 #[tauri::command]
@@ -70,7 +208,9 @@ pub async fn api_login(
     username: String,
     password: String,
 ) -> Result<Value, String> {
+    let origin = base();
     let data = edge(
+        &origin,
         "POST",
         "/api/account/loginByPassword",
         Some(json!({ "username": username, "password": password })),
@@ -83,7 +223,10 @@ pub async fn api_login(
         .ok_or_else(|| "登录返回缺少 token".to_string())?
         .to_string();
     let user = data.get("user").cloned().unwrap_or(Value::Null);
-    state.session.set(token, user.clone());
+    if base() != origin {
+        return Err("登录期间线路已变化，请重新登录".into());
+    }
+    state.session.set(&origin, token, user.clone());
     Ok(json!({ "user": user }))
 }
 
@@ -94,6 +237,7 @@ pub async fn api_register(
     password: String,
     email: String,
 ) -> Result<Value, String> {
+    let origin = base();
     let mut body = json!({
         "username": username,
         "password": password,
@@ -102,30 +246,53 @@ pub async fn api_register(
     if !email.trim().is_empty() {
         body["email"] = json!(email);
     }
-    let data = edge("POST", "/api/account/registerByPassword", Some(body), None).await?;
+    let data = edge(
+        &origin,
+        "POST",
+        "/api/account/registerByPassword",
+        Some(body),
+        None,
+    )
+    .await?;
     let token = data
         .get("token")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "注册返回缺少 token".to_string())?
         .to_string();
     let user = data.get("user").cloned().unwrap_or(Value::Null);
-    state.session.set(token, user.clone());
+    if base() != origin {
+        return Err("注册期间线路已变化，请重新登录".into());
+    }
+    state.session.set(&origin, token, user.clone());
     Ok(json!({ "user": user }))
 }
 
 #[tauri::command]
 pub async fn api_logout(state: State<'_, Api>) -> Result<Value, String> {
-    let token = state.token();
-    let _ = edge("POST", "/api/account/logout", None, token.as_deref()).await;
+    let origin = base();
+    let token = state.session.token(&origin);
+    let _ = edge(
+        &origin,
+        "POST",
+        "/api/account/logout",
+        None,
+        token.as_deref(),
+    )
+    .await;
     state.session.clear();
     Ok(json!({ "ok": true }))
 }
 
 #[tauri::command]
 pub async fn api_me(state: State<'_, Api>) -> Result<Value, String> {
-    let me = state.get("/api/account/me").await?;
-    if let Some(user) = state.session.token() {
-        state.session.set(user, me.clone());
+    let origin = base();
+    let token = state.session.token(&origin);
+    let me = edge(&origin, "GET", "/api/account/me", None, token.as_deref()).await?;
+    if base() != origin {
+        return Err("读取账号期间线路已变化".into());
+    }
+    if let Some(token) = state.session.token(&origin) {
+        state.session.set(&origin, token, me.clone());
     }
     Ok(me)
 }
@@ -238,12 +405,7 @@ pub async fn api_comment_send(
 }
 
 #[tauri::command]
-pub async fn api_like(
-    state: State<'_, Api>,
-    id: i64,
-    ep: u32,
-    on: bool,
-) -> Result<Value, String> {
+pub async fn api_like(state: State<'_, Api>, id: i64, ep: u32, on: bool) -> Result<Value, String> {
     let method = if on { "POST" } else { "DELETE" };
     state
         .authed(method, &format!("/api/videos/{id}/like?ep={ep}"), None)
@@ -251,11 +413,7 @@ pub async fn api_like(
 }
 
 #[tauri::command]
-pub async fn api_collect(
-    state: State<'_, Api>,
-    id: i64,
-    on: bool,
-) -> Result<Value, String> {
+pub async fn api_collect(state: State<'_, Api>, id: i64, on: bool) -> Result<Value, String> {
     let method = if on { "POST" } else { "DELETE" };
     state
         .authed(method, &format!("/api/videos/{id}/collect"), None)
@@ -263,11 +421,7 @@ pub async fn api_collect(
 }
 
 #[tauri::command]
-pub async fn api_follow(
-    state: State<'_, Api>,
-    uid: i64,
-    on: bool,
-) -> Result<Value, String> {
+pub async fn api_follow(state: State<'_, Api>, uid: i64, on: bool) -> Result<Value, String> {
     let method = if on { "POST" } else { "DELETE" };
     state
         .authed(method, &format!("/api/users/{uid}/follow"), None)
@@ -310,4 +464,58 @@ pub async fn api_post_comments(
     state
         .get(&format!("/api/posts/{id}/comments?page={page}&size={size}"))
         .await
+}
+#[cfg(test)]
+mod tests {
+    use super::is_newer;
+    use serde_json::Value;
+
+    #[test]
+    fn frontend_cannot_bypass_url_policy_with_opener_commands() {
+        let capability: Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        for permission in capability["permissions"].as_array().unwrap() {
+            let name = permission
+                .as_str()
+                .or_else(|| permission["identifier"].as_str())
+                .unwrap();
+            assert!(
+                !name.starts_with("opener:"),
+                "frontend opener command exposed: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn external_links_are_urls_not_shell_commands() {
+        for raw in [
+            "https://example.com/|calc.exe",
+            "https://example.com/?a=1&b=2",
+            "https://example.com/%25PATH%25",
+            "https://example.com/%VAR%",
+        ] {
+            assert!(crate::network_policy::parse_target(raw).is_ok());
+        }
+        for raw in [
+            "file:///etc/passwd",
+            "mailto:user@example.com",
+            "tel:123",
+            "data:text/html,test",
+            "javascript:alert(1)",
+            "https://example.com/\0cmd",
+            "https://user:password@example.com/",
+        ] {
+            assert!(crate::network_policy::parse_target(raw).is_err());
+        }
+    }
+
+    #[test]
+    fn compares_versions() {
+        assert!(is_newer("v1.0.2", "1.0.1"));
+        assert!(is_newer("v1.1", "1.0.9"));
+        assert!(is_newer("1.0.10", "1.0.9"));
+        assert!(!is_newer("v1.0.1", "1.0.1"));
+        assert!(!is_newer("v0.9.9", "1.0.1"));
+        assert!(!is_newer("", "1.0.1"));
+    }
 }

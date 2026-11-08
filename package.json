@@ -1,23 +1,29 @@
 {
   "name": "huangguo-client",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && tsc --project tsconfig.tests.json && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "app:dev": "tauri dev",
     "app:build": "tauri build",
+    "mac:build": "tauri build --bundles app,dmg",
     "android:init": "tauri android init",
     "android:icons": "node scripts/sync-android-icons.mjs",
     "android:dev": "tauri android dev",
-    "android:build": "tauri android build"
+    "android:build": "tauri android build",
+    "ios:init": "tauri ios init",
+    "ios:dev": "tauri ios dev",
+    "ios:build": "tauri ios build --export-method debugging"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",
     "clsx": "2.1.1",
+    "dompurify": "3.4.17",
     "hls.js": "1.6.15",
     "react": "19.2.6",
     "react-dom": "19.2.6",
