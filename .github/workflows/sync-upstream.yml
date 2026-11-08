@@ -1,0 +1,55 @@
+name: Sync upstream
+
+# 把上游 Minireel/HGhub 的 main 并进本仓库（fork）的 main，供 CI 出包用。
+# 只想一次性同步的话，在 Actions 页点 "Run workflow" 即可；
+# 定时任务在 fork 上默认是关的，需要 Settings → Actions → General 里勾上
+# "Allow all scheduled workflows"（该开关只对本仓库生效）才会自动跑。
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: upstream/main → main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: 合并上游
+        run: |
+          set -euo pipefail
+          UPSTREAM="Minireel/HGhub"
+          BRANCH="main"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/${UPSTREAM}.git"
+          git fetch -q --no-tags upstream "$BRANCH"
+
+          if git merge-base --is-ancestor FETCH_HEAD HEAD; then
+            echo "上游没有新提交，跳过。"
+            exit 0
+          fi
+
+          # fork 的 main 若有自己的提交（比如 CI 的占位提交）就 ff 不了，退化成 merge commit。
+          if ! git merge --ff-only FETCH_HEAD; then
+            echo "::notice::fork 有独有提交，改用 merge commit 合入上游。"
+            if ! git merge --no-edit FETCH_HEAD; then
+              git merge --abort
+              echo "::error::与上游 ${UPSTREAM}/${BRANCH} 冲突，CI 无法自动合，请本地 git merge upstream/${BRANCH} 解决后再推。"
+              exit 1
+            fi
+          fi
+
+          git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
+          echo "已同步到 $(git rev-parse --short HEAD)。功能分支要跟上：git fetch upstream && git rebase upstream/${BRANCH} <你的分支>"

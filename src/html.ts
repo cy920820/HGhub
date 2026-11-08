@@ -127,7 +127,7 @@ const STRICT_INPUT_ATTR = [
 const STRICT_FINAL_ATTR = [
   "href", "src", "alt", "title", "colspan", "rowspan", "start", "target", "rel", "loading",
 ];
-// 保留 DOMPurify 的安全 URL/普通属性值规则，并允许本应用的 macOS 图片协议。
+// 保留 DOMPurify 的安全 URL/普通属性值规则，并允许本应用 macOS / iOS 的图片协议。
 const SAFE_FINAL_URI = /^(?:(?:https?|ftp|ftps|tel|mailto|callto|sms|cid|xmpp|matrix):|hg:\/\/localhost\/|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
 
 /** 正文只接受所需 HTML 排版，不允许 SVG/MathML、事件、样式和可执行 URL。 */

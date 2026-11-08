@@ -81,6 +81,8 @@ const VideoSurface = forwardRef<VideoHandle, Props>(function VideoSurface(
     applySettings();
 
     if (useHls && Hls.isSupported()) {
+      // iOS 走的是 hls.js 的 ManagedMediaSource 分支，因此 bundle.iOS.minimumSystemVersion 定在 17.1：
+      // 更低的系统既没有 MSE/MMS，原生 <video> 又啃不动 hg:// 自定义协议。
       const hls = new Hls({
         // 禁用从插播/内容引导 JSON 派生直连 URL 的可选功能。
         interstitialsController: undefined,

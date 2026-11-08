@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, fmt } from "../api";
+import { api, fmt, isMobile } from "../api";
 import type { RankItem, VideoCard } from "../types";
 import { useStore } from "../store";
 import { Masonry, RankRow } from "../components/cards";
@@ -21,7 +21,8 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
   const busy = useRef(false);
 
   useEffect(() => {
-    if (active && !/Android/i.test(navigator.userAgent)) inputRef.current?.focus();
+    // 移动端自动聚焦会弹软键盘盖住结果，只在桌面端抢焦点
+    if (active && !isMobile) inputRef.current?.focus();
   }, [active]);
 
   const run = async (keyword: string, p: number) => {

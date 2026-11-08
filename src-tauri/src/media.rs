@@ -2,7 +2,7 @@
 //!
 //! 站点封面是 AES-128-CBC 密文，m3u8 内部分片/key 又可能被 WebView 的 CORS 拦住，
 //! 所以图片与视频统一走本地自定义协议（Windows/Android 为 `http://hg.localhost`，
-//! macOS 为 `hg://localhost`，见 [`LOCAL_ORIGIN`]）。
+//! macOS / iOS 为 `hg://localhost`，见 [`LOCAL_ORIGIN`]）。
 
 use crate::net::fetch_bytes;
 use aes::cipher::{BlockDecrypt, KeyInit};

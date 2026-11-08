@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, APP_VERSION, hostOf, logLine, platform, type UpdateInfo } from "../api";
+import { api, APP_VERSION, hostOf, logLine, PLATFORM_LABEL, platform, type UpdateInfo } from "../api";
 import { useStore } from "../store";
 import { Modal, Toggle } from "../components/ui";
 import LinePicker from "../components/LinePicker";
 import { IBack, IBoltF, IBroom, IChevR, IHeart, IInfo, ILink, ILockF, IMoon, IRefresh, ISettings, ISun } from "../icons";
 
 /* 独立设置页：线路 / 外观 / 本地数据 / 清理缓存 / 网络诊断 / 关于
-   入口：Windows 侧栏「设置」、Android「我的」右上角齿轮 */
+   入口：桌面端侧栏「设置」、移动端（Android / iOS）「我的」右上角齿轮 */
 export default function Settings({ onBack, wide }: { onBack: () => void; wide: boolean }) {
   const { theme, setTheme, favs, history, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity, toast } = useStore();
   const [about, setAbout] = useState(false);
@@ -160,7 +160,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
             </button>
           </Section>
 
-          <div className="text-center text-[10px] text-dim mt-5">HGhub {APP_VERSION} · {platform === "android" ? "Android" : platform === "macos" ? "macOS" : "Windows"} 客户端</div>
+          <div className="text-center text-[10px] text-dim mt-5">HGhub {APP_VERSION} · {PLATFORM_LABEL[platform]} 客户端</div>
         </div>
       </div>
 
@@ -177,7 +177,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           </div>
 
           <p className="text-[12px] text-on/70 leading-relaxed mt-4">
-            基于 Rust + Tauri 2 构建的跨平台客户端，支持 Windows、macOS 与 Android。
+            基于 Rust + Tauri 2 构建的跨平台客户端，支持 Windows、macOS、Android 与 iOS。
             界面遵循 Fluent 设计语言，播放器采用沉浸式竖屏信息流。
           </p>
 

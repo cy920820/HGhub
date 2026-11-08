@@ -42,6 +42,9 @@ fn allowed_frontend_origin(origin: &str) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // iOS 的 WebKit 没有 Vibration API，触感只能走 UIImpactFeedbackGenerator；
+        // 桌面端该插件是空实现，不影响 Windows/macOS。
+        .plugin(tauri_plugin_haptics::init())
         .plugin(
             tauri_plugin_opener::Builder::new()
                 .open_js_links_on_click(false)
@@ -55,6 +58,13 @@ pub fn run() {
                 net::bind_base(&dir);
                 let state: tauri::State<Api> = app.state();
                 state.session.bind(dir);
+            }
+            // 无边框窗口在 macOS 上仍然需要菜单栏：WKWebView 的复制/粘贴/全选走
+            //  responder chain，没有 Edit 菜单时登录框连密码都粘不进去。
+            #[cfg(target_os = "macos")]
+            {
+                let menu = tauri::menu::Menu::default(app.handle())?;
+                app.set_menu(menu)?;
             }
             Ok(())
         })

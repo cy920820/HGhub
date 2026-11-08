@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { cover } from "../api";
+import { useKeyboardInset } from "../keyboard";
 import { useStore } from "../store";
 import { ICheck, IClose, IHeartF, ISparkF, IStarF } from "../icons";
 
@@ -44,13 +45,15 @@ export function Sheet({ open, onClose, children, z = "z-40" }: { open: boolean; 
 /* ——— 居中弹窗 ——— */
 export function Modal({ open, onClose, children, width = 340 }: { open: boolean; onClose: () => void; children: React.ReactNode; width?: number }) {
   const [render, setRender] = useState(open);
+  const kb = useKeyboardInset();
   useEffect(() => {
     if (open) setRender(true);
     else { const t = window.setTimeout(() => setRender(false), 200); return () => window.clearTimeout(t); }
   }, [open]);
   if (!render) return null;
   return (
-    <div className="absolute inset-0 z-[55] flex items-center justify-center p-6">
+    // 底部 padding 加上键盘高度：绝对定位的遮罩仍铺满整屏，居中的卡片只在键盘上方居中
+    <div className="absolute inset-0 z-[55] flex items-center justify-center p-6" style={{ paddingBottom: 24 + kb }}>
       <div className={`absolute inset-0 bg-black/65 backdrop-blur-sm ${open ? "a-fade" : "opacity-0 transition-opacity"}`} onClick={onClose} />
       <div className={`relative bg-s3 rounded-(--r-lg) elev-3 ${open ? "a-scale-in" : "opacity-0 scale-90 transition-all"}`} style={{ width, maxWidth: "100%" }}>
         {children}
